@@ -1,0 +1,22 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npx shadcn@latest add card button badge avatar input table select dropdown-menu)",
+      "Bash(npm run dev)",
+      "Bash(npx shadcn@latest add tabs separator scroll-area)",
+      "Bash(npx shadcn@latest add collapsible)",
+      "Bash(npx shadcn@latest add sheet)",
+      "Bash(npx shadcn@latest add label textarea switch --yes)",
+      "Bash(ls /Users/zhangqufei/Desktop/DevOps/qufieAI/my-app/src/app/(dashboard)/)",
+      "Bash(ls /Users/zhangqufei/Desktop/DevOps/qufieAI/my-app/src/app/(dashboard)/inbox/)",
+      "Bash(ls -la /Users/zhangqufei/Desktop/DevOps/qufieAI/my-app/src/app/(dashboard)/settings/)",
+      "Bash(npm install @supabase/supabase-js @vapi-ai/web)",
+      "Bash(npx tsx scripts/test-supabase.ts)",
+      "Bash(npx tsx scripts/test-with-service-role.ts)",
+      "Bash(ls my-app/.env* 2>/dev/null; ls frontend/.env* 2>/dev/null)",
+      "Bash(git init && git add . && git commit -m \"Initial commit\" && git remote add origin https://github.com/qufeiz/HonisAI.git && git branch -M main)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}
