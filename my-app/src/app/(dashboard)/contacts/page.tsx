@@ -254,6 +254,8 @@ export default function ContactsPage() {
   const [expandedCallId, setExpandedCallId] = useState<string | null>(null);
   const [messageText, setMessageText] = useState("");
   const [messageChannel, setMessageChannel] = useState<"sms" | "email" | "whatsapp">("sms");
+  const [calling, setCalling] = useState(false);
+  const [callStatus, setCallStatus] = useState<string | null>(null);
 
   // Fetch contacts from Supabase
   useEffect(() => {
@@ -276,6 +278,50 @@ export default function ContactsPage() {
     }
     fetchMessages();
   }, [selectedContact]);
+
+  // Make outbound call
+  async function handleMakeCall(contactId: string) {
+    setCalling(true);
+    setCallStatus('Initiating call...');
+
+    try {
+      const response = await fetch('/api/calls/outbound', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contactId,
+          assistantType: 'sales',
+        }),
+      });
+
+      const data = await response.json();
+
+      if (data.success) {
+        setCallStatus(`Calling ${data.call.contactName}...`);
+
+        // Refresh messages after a few seconds
+        setTimeout(async () => {
+          const messages = await getMessagesForContact(contactId);
+          setSelectedContactMessages(messages);
+          setCalling(false);
+          setCallStatus(null);
+        }, 3000);
+      } else {
+        setCallStatus('Call failed');
+        setTimeout(() => {
+          setCalling(false);
+          setCallStatus(null);
+        }, 3000);
+      }
+    } catch (error) {
+      console.error('Error making call:', error);
+      setCallStatus('Call failed');
+      setTimeout(() => {
+        setCalling(false);
+        setCallStatus(null);
+      }, 3000);
+    }
+  }
 
   const handleContactClick = (contact: typeof mockContacts[0]) => {
     setSelectedContact(contact);
@@ -438,18 +484,28 @@ export default function ContactsPage() {
           {selectedContact && (
             <>
               <SheetHeader className="px-6 pt-6 pb-4 border-b">
-                <div className="flex items-center gap-3">
-                  <Avatar className="h-12 w-12">
-                    <AvatarFallback className="bg-primary/10 text-primary text-lg">
-                      {selectedContact.name.split(' ').map((n: string) => n[0]).join('')}
-                    </AvatarFallback>
-                  </Avatar>
-                  <div className="flex-1">
-                    <SheetTitle className="text-lg">{selectedContact.name}</SheetTitle>
-                    <p className="text-sm text-muted-foreground">
-                      Contact ID: {selectedContact.id.split('-')[0]}...
-                    </p>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <Avatar className="h-12 w-12">
+                      <AvatarFallback className="bg-primary/10 text-primary text-lg">
+                        {selectedContact.name.split(' ').map((n: string) => n[0]).join('')}
+                      </AvatarFallback>
+                    </Avatar>
+                    <div className="flex-1">
+                      <SheetTitle className="text-lg">{selectedContact.name}</SheetTitle>
+                      <p className="text-sm text-muted-foreground">
+                        Contact ID: {selectedContact.id.split('-')[0]}...
+                      </p>
+                    </div>
                   </div>
+                  <Button
+                    onClick={() => handleMakeCall(selectedContact.id)}
+                    disabled={calling}
+                    className="gap-2"
+                  >
+                    <Phone className="h-4 w-4" />
+                    {calling ? callStatus : 'Call'}
+                  </Button>
                 </div>
               </SheetHeader>
 
@@ -782,7 +838,9 @@ export default function ContactsPage() {
                                         : "bg-muted"
                                     )}
                                   >
-                                    {message.direction === "outbound" ? (isAI ? "AI" : selectedContact.initials.charAt(0)) : selectedContact.initials}
+                                    {message.direction === "outbound"
+                                      ? (isAI ? "AI" : selectedContact?.name?.charAt(0) || "U")
+                                      : selectedContact?.name?.charAt(0) || "U"}
                                   </AvatarFallback>
                                 </Avatar>
                                 <div

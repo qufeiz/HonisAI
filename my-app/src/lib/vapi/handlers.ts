@@ -1,5 +1,6 @@
 // Vapi Webhook Event Handlers
 import { supabase } from '@/lib/supabase/client';
+import OpenAI from 'openai';
 import type {
   AssistantRequestPayload,
   StatusUpdatePayload,
@@ -7,6 +8,10 @@ import type {
   FunctionCallPayload,
   EndOfCallReportPayload,
 } from '@/types/vapi';
+
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY,
+});
 
 // =====================================================
 // ASSISTANT REQUEST - Inbound call started
@@ -70,18 +75,53 @@ export async function handleAssistantRequest(payload: AssistantRequestPayload) {
     console.log('[Vapi] Created call record:', callRecord?.id);
   }
 
-  // 4. Return dynamic assistant configuration
-  return {
+  // 4. Return dynamic assistant configuration with contact context
+  const { salesAssistantConfig } = await import('./assistants');
+
+  // Build context about the contact for the assistant
+  let contactContext = '';
+  if (contact) {
+    const contextParts = [];
+    if (contact.name && contact.name !== 'Unknown') {
+      contextParts.push(`- Name: ${contact.name}`);
+    }
+    if (contact.email) {
+      contextParts.push(`- Email: ${contact.email}`);
+    }
+    if (contact.notes) {
+      contextParts.push(`- Notes: ${contact.notes}`);
+    }
+    if (contact.contact_type) {
+      contextParts.push(`- Lead Type: ${contact.contact_type}`);
+    }
+
+    if (contextParts.length > 0) {
+      contactContext = `\n\nCaller History:\n${contextParts.join('\n')}`;
+    }
+  }
+
+  // Customize system prompt with contact history
+  const customizedSystemPrompt = contactContext
+    ? salesAssistantConfig.model.systemPrompt + contactContext
+    : salesAssistantConfig.model.systemPrompt;
+
+  const response = {
     assistant: {
+      ...salesAssistantConfig,
+      model: {
+        ...salesAssistantConfig.model,
+        systemPrompt: customizedSystemPrompt,
+      },
       firstMessage: contact?.name && contact.name !== 'Unknown'
         ? `Hello! Thanks for calling QufieAI Real Estate. Is this ${contact.name}?`
         : 'Hello! Thanks for calling QufieAI Real Estate. How can I help you today?',
-      variableValues: {
-        contactName: contact?.name || 'there',
-        contactPhone: phoneNumber,
-      },
     },
   };
+
+  const fs = require('fs');
+  fs.writeFileSync('/tmp/vapi-assistant-config.json', JSON.stringify(response, null, 2));
+  console.log('[Vapi] Wrote assistant config to /tmp/vapi-assistant-config.json');
+  return response;
 }
 
 // =====================================================
@@ -91,6 +131,62 @@ export async function handleStatusUpdate(payload: StatusUpdatePayload) {
   const { call, status } = payload.message;
 
   console.log('[Vapi] Status update:', call.id, status);
+
+  // If this is the first event (in-progress), create the call record if it doesn't exist
+  if (status === 'in-progress') {
+    const { data: existing } = await supabase
+      .from('calls')
+      .select('id')
+      .eq('vapi_call_id', call.id)
+      .single();
+
+    if (!existing) {
+      // Create call record since assistant-request wasn't sent (persistent assistant)
+      const phoneNumber = call.customer?.number || 'Unknown';
+
+      // Look up or create contact
+      const { data: existingContacts } = await supabase
+        .from('contacts')
+        .select('*')
+        .eq('phone', phoneNumber)
+        .limit(1);
+
+      let contact = existingContacts?.[0];
+
+      if (!contact) {
+        const { data: newContact } = await supabase
+          .from('contacts')
+          .insert({
+            phone: phoneNumber,
+            name: call.customer?.name || 'Unknown',
+            source: 'Inbound Call',
+            status: 'pending',
+            contact_type: 'Buyer',
+            assigned_to_type: 'ai',
+          })
+          .select()
+          .single();
+        contact = newContact;
+      }
+
+      // Create call record
+      await supabase
+        .from('calls')
+        .insert({
+          contact_id: contact?.id,
+          vapi_call_id: call.id,
+          direction: call.type?.includes('inbound') ? 'inbound' : 'outbound',
+          from_number: phoneNumber,
+          to_number: call.phoneNumber?.number || '',
+          status: 'in-progress',
+          handled_by_type: 'ai',
+          handled_by_name: 'AI Agent',
+          started_at: new Date().toISOString(),
+        });
+
+      console.log('[Vapi] Created call record from status-update');
+    }
+  }
 
   // Map Vapi status to our database status
   const dbStatus = status === 'ended' ? 'completed' : status;
@@ -287,14 +383,15 @@ export async function handleEndOfCallReport(payload: EndOfCallReportPayload) {
     console.log('[Vapi] Updated call with final data');
   }
 
-  // Update conversation last_message
+  // Get call record with contact
   const { data: callRecord } = await supabase
     .from('calls')
-    .select('contact_id')
+    .select('contact_id, contacts(*)')
     .eq('vapi_call_id', call.id)
     .single();
 
   if (callRecord?.contact_id) {
+    // Update conversation last_message
     await supabase
       .from('conversations')
       .upsert({
@@ -305,7 +402,68 @@ export async function handleEndOfCallReport(payload: EndOfCallReportPayload) {
       }, {
         onConflict: 'contact_id',
       });
+
+    // Extract contact info from transcript and update contact
+    await extractAndUpdateContactInfo(transcript, callRecord.contact_id, callRecord.contacts);
   }
 
   return { success: true };
+}
+
+// Helper function to extract contact info from transcript using AI
+async function extractAndUpdateContactInfo(transcript: string, contactId: string, existingContact: any) {
+  if (!transcript) return;
+
+  try {
+    // Use OpenAI to extract structured data from transcript
+    const completion = await openai.chat.completions.create({
+      model: 'gpt-4o-mini',
+      messages: [
+        {
+          role: 'system',
+          content: `You are a data extraction assistant. Extract the customer's name and email from the call transcript.
+Return a JSON object with "name" and "email" fields. If information is not found, use null.
+For spoken emails like "tuesday z at g mail dot com", convert to proper format: "tuesdayz@gmail.com".
+Only extract information that was explicitly stated by the user (not the AI agent).`,
+        },
+        {
+          role: 'user',
+          content: `Extract name and email from this transcript:\n\n${transcript}`,
+        },
+      ],
+      response_format: { type: 'json_object' },
+      temperature: 0,
+    });
+
+    const extracted = JSON.parse(completion.choices[0].message.content || '{}');
+    console.log('[Vapi] AI extracted contact info:', extracted);
+
+    const updates: any = {};
+
+    // Only update if we don't already have the info
+    if (extracted.name && (!existingContact?.name || existingContact.name === 'Unknown')) {
+      updates.name = extracted.name;
+    }
+
+    if (extracted.email && !existingContact?.email) {
+      updates.email = extracted.email.toLowerCase().trim();
+    }
+
+    // Only update if we found something
+    if (Object.keys(updates).length > 0) {
+      console.log('[Vapi] Updating contact with AI-extracted info:', updates);
+      const { error } = await supabase
+        .from('contacts')
+        .update(updates)
+        .eq('id', contactId);
+
+      if (error) {
+        console.error('[Vapi] Error updating contact info:', error);
+      } else {
+        console.log('[Vapi] Contact updated successfully');
+      }
+    }
+  } catch (error) {
+    console.error('[Vapi] Error extracting contact info with AI:', error);
+  }
 }

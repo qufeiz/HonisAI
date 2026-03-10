@@ -1,10 +1,11 @@
 // Vapi Assistant Configurations
-import type { VapiAssistant, VapiFunction } from '@/types/vapi';
+import type { VapiAssistant, VapiFunction, VapiTool } from '@/types/vapi';
 
 // =====================================================
-// FUNCTION DEFINITIONS
+// FUNCTION DEFINITIONS (Custom functions our webhook handles)
 // =====================================================
 
+// Transfer to human function - our webhook handles the actual transfer
 const transferToHumanFunction: VapiFunction = {
   name: 'transfer_to_human',
   description: 'Transfer the call to a human agent when the customer needs detailed assistance, has complex questions, or is ready to make a decision. Use this when AI cannot adequately help.',
@@ -57,7 +58,7 @@ export const salesAssistantConfig: VapiAssistant = {
   firstMessage: 'Hello! Thanks for calling QufieAI Real Estate. How can I help you today?',
   model: {
     provider: 'openai',
-    model: 'gpt-4',
+    model: 'gpt-4o',
     temperature: 0.7,
     systemPrompt: `You are a professional and friendly real estate sales agent for QufieAI Real Estate.
 
@@ -74,14 +75,16 @@ Guidelines:
 - Provide accurate information about properties
 - If you don't know specific details (exact HOA fees, detailed property history, etc.), offer to connect them with a specialist
 - Always confirm key details (phone number, email, property address, viewing times)
-- Use the transfer function when customers have complex questions or are ready to make decisions
 
-Important scenarios to transfer:
+CRITICAL: When to use the transfer_to_human function:
+- Customer explicitly asks to speak with a human, agent, or specialist
 - Customer wants to schedule a viewing
 - Customer has detailed questions about pricing, fees, or contracts
 - Customer is ready to make an offer
 - Customer needs investment analysis
 - Customer asks questions you cannot confidently answer
+
+When a customer requests a transfer, you MUST immediately call the transfer_to_human function - do not just say you will transfer them. Actually execute the function call.
 
 Never:
 - Make up information about properties
@@ -133,7 +136,7 @@ export const investmentAssistantConfig: VapiAssistant = {
   firstMessage: 'Hello! This is the QufieAI Real Estate Investment Division. How can I assist you with investment properties today?',
   model: {
     provider: 'openai',
-    model: 'gpt-4',
+    model: 'gpt-4o',
     temperature: 0.7,
     systemPrompt: `You are a professional investment property specialist for QufieAI Real Estate.
 
@@ -166,6 +169,8 @@ Transfer when:
 - Questions about complex financing structures
 - Need market analysis reports
 
+When transferring, you MUST call the transfer_to_human function - do not just say you will transfer.
+
 Never:
 - Give specific tax advice (recommend talking to CPA)
 - Quote exact ROI without proper analysis
@@ -183,6 +188,7 @@ Never:
   },
   functions: [
     transferToHumanFunction,
+    scheduleViewingFunction,
   ],
   analysisPlan: {
     summaryPrompt: 'Summarize this investment consultation call in 2-3 sentences.',

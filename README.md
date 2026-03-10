@@ -103,4 +103,4 @@ my-app/
 
 ## Detailed Setup
 
-See [SETUP_GUIDE.md](./SETUP_GUIDE.md) for full step-by-step setup including Vapi assistant configuration, function calling setup, and troubleshooting.
+See [SETUP_GUIDE.md](./my-app/SETUP_GUIDE.md) for full step-by-step setup including Vapi assistant configuration, function calling setup, and troubleshooting.

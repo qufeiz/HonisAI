@@ -167,6 +167,7 @@ export interface VapiAssistant {
     language?: string;
   };
   functions?: VapiFunction[];
+  tools?: VapiTool[];
   analysisPlan?: {
     summaryPrompt?: string;
     structuredDataPrompt?: string;
@@ -195,6 +196,28 @@ export interface VapiFunction {
     }>;
     required?: string[];
   };
+}
+
+export interface VapiTool {
+  type: 'transferCall' | 'endCall' | 'dtmf' | 'function';
+  async?: boolean;
+  destinations?: Array<{
+    type: 'number' | 'sip';
+    number?: string;
+    message?: string;
+    extension?: string;
+  }>;
+  description?: string;
+  function?: VapiFunction;
+  messages?: Array<{
+    type: 'request-start' | 'request-complete' | 'request-failed';
+    content: string;
+    conditions?: Array<{
+      param: string;
+      operator: 'eq' | 'ne' | 'gt' | 'lt' | 'gte' | 'lte';
+      value: string | number;
+    }>;
+  }>;
 }
 
 // Outbound Call Request
