@@ -1,6 +1,7 @@
 // Vapi Webhook Event Handlers
 import { supabase } from '@/lib/supabase/client';
 import OpenAI from 'openai';
+import { addLog } from '@/app/api/logs/route';
 import type {
   AssistantRequestPayload,
   StatusUpdatePayload,
@@ -131,6 +132,7 @@ export async function handleStatusUpdate(payload: StatusUpdatePayload) {
   const { call, status } = payload.message;
 
   console.log('[Vapi] Status update:', call.id, status);
+  addLog('info', 'status-update', `Call ${status}`, { callId: call.id, status });
 
   // If this is the first event (in-progress), create the call record if it doesn't exist
   if (status === 'in-progress') {
@@ -255,6 +257,11 @@ export async function handleFunctionCall(payload: FunctionCallPayload) {
 
   console.log('[Vapi] Function call:', functionCall.name, functionCall.parameters);
 
+  // Handle getCustomerMemory
+  if (functionCall.name === 'getCustomerMemory') {
+    return await handleGetCustomerMemory(call, functionCall.parameters);
+  }
+
   // Handle transfer_to_human
   if (functionCall.name === 'transfer_to_human') {
     return await handleTransferToHuman(call, functionCall.parameters);
@@ -275,9 +282,75 @@ export async function handleFunctionCall(payload: FunctionCallPayload) {
   };
 }
 
+// Handle getCustomerMemory - fetch caller history
+async function handleGetCustomerMemory(call: any, parameters: any) {
+  const phoneNumber = parameters.phone_number || call.customer?.number;
+
+  if (!phoneNumber) {
+    return {
+      result: {
+        success: false,
+        message: 'No phone number provided',
+      },
+    };
+  }
+
+  console.log('[Vapi] Fetching customer memory for:', phoneNumber);
+
+  // Look up contact and their call history
+  const { data: contact } = await supabase
+    .from('contacts')
+    .select('*, calls(*)')
+    .eq('phone', phoneNumber)
+    .single();
+
+  if (!contact) {
+    console.log('[Vapi] New customer - no history found');
+    return {
+      result: {
+        success: true,
+        is_new_customer: true,
+        customer_name: null,
+        customer_email: null,
+        call_count: 0,
+        last_call_summary: null,
+        last_call_date: null,
+        notes: null,
+        contact_type: null,
+      },
+    };
+  }
+
+  // Get most recent completed calls
+  const recentCalls = contact.calls
+    ?.filter((c: any) => c.status === 'completed')
+    ?.sort((a: any, b: any) => new Date(b.ended_at).getTime() - new Date(a.ended_at).getTime());
+
+  const result = {
+    success: true,
+    is_new_customer: false,
+    customer_name: contact.name !== 'Unknown' ? contact.name : null,
+    customer_email: contact.email,
+    call_count: recentCalls?.length || 0,
+    last_call_summary: recentCalls?.[0]?.call_summary || null,
+    last_call_date: recentCalls?.[0]?.ended_at || null,
+    notes: contact.notes,
+    contact_type: contact.contact_type,
+  };
+
+  console.log('[Vapi] Customer memory fetched:', result);
+  return { result };
+}
+
 // Handle transfer to human agent
 async function handleTransferToHuman(call: any, parameters: any) {
   const { reason, urgency = 'medium' } = parameters;
+
+  addLog('info', 'transfer-to-human', `Transfer requested: ${reason}`, {
+    callId: call.id,
+    reason,
+    urgency
+  });
 
   // 1. Get call and contact info
   const { data: callRecord } = await supabase
@@ -287,6 +360,7 @@ async function handleTransferToHuman(call: any, parameters: any) {
     .single();
 
   if (!callRecord) {
+    addLog('error', 'transfer-to-human', 'Call not found in database', { callId: call.id });
     return { result: { success: false, message: 'Call not found' } };
   }
 
@@ -351,6 +425,13 @@ export async function handleEndOfCallReport(payload: EndOfCallReportPayload) {
   const { call, transcript, recordingUrl, summary, endedReason } = payload.message;
 
   console.log('[Vapi] End of call report:', call.id, endedReason);
+  addLog('info', 'end-of-call-report', `Call ended: ${endedReason}`, {
+    callId: call.id,
+    endedReason,
+    duration: call.endedAt && call.startedAt ? Math.floor((new Date(call.endedAt).getTime() - new Date(call.startedAt).getTime()) / 1000) : 0,
+    hasTranscript: !!transcript,
+    hasRecording: !!recordingUrl,
+  });
 
   // Calculate duration
   const startedAt = call.startedAt ? new Date(call.startedAt) : null;
@@ -452,6 +533,8 @@ Only extract information that was explicitly stated by the user (not the AI agen
     // Only update if we found something
     if (Object.keys(updates).length > 0) {
       console.log('[Vapi] Updating contact with AI-extracted info:', updates);
+      addLog('info', 'ai-extraction', 'Contact info extracted and updated', updates);
+
       const { error } = await supabase
         .from('contacts')
         .update(updates)
@@ -459,6 +542,7 @@ Only extract information that was explicitly stated by the user (not the AI agen
 
       if (error) {
         console.error('[Vapi] Error updating contact info:', error);
+        addLog('error', 'ai-extraction', 'Failed to update contact', { error: String(error) });
       } else {
         console.log('[Vapi] Contact updated successfully');
       }

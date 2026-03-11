@@ -9,6 +9,7 @@ import {
   handleFunctionCall,
   handleEndOfCallReport,
 } from '@/lib/vapi/handlers';
+import { addLog } from '@/app/api/logs/route';
 
 export async function POST(request: NextRequest) {
   try {
@@ -17,6 +18,10 @@ export async function POST(request: NextRequest) {
     const eventType = payload.message.type;
 
     console.log('[Vapi Webhook] Received event:', eventType);
+    addLog('info', 'webhook', `Event received: ${eventType}`, {
+      callId: (payload.message as any).call?.id,
+      type: eventType
+    });
 
     // Route to appropriate handler
     let response;

@@ -8,7 +8,8 @@ import {
   Phone,
   Target,
   Settings,
-  Inbox
+  Inbox,
+  Terminal
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -18,6 +19,7 @@ const navigation = [
   { name: "Contacts", href: "/contacts", icon: Users },
   { name: "Campaigns", href: "/campaigns", icon: Target },
   { name: "Call History", href: "/calls", icon: Phone },
+  { name: "Logs", href: "/logs", icon: Terminal },
   { name: "Settings", href: "/settings", icon: Settings },
 ];
 
